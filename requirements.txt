@@ -18,3 +18,4 @@ httpx
 supabase
 sarvamai>=0.1.25
 numpy>=1.26.0
+certifi>=2024.2.2
