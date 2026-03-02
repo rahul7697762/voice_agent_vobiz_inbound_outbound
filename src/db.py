@@ -1,5 +1,6 @@
 import os
 import logging
+import certifi
 from supabase import create_client, Client
 
 logger = logging.getLogger("db")
@@ -10,6 +11,11 @@ def get_supabase() -> Client | None:
     if not url or not key:
         return None
     try:
+        # Patch SSL CA bundle for all HTTP libraries (fixes Windows self-signed cert error)
+        ca = certifi.where()
+        os.environ["SSL_CERT_FILE"]      = ca
+        os.environ["REQUESTS_CA_BUNDLE"] = ca
+        os.environ["CURL_CA_BUNDLE"]     = ca
         return create_client(url, key)
     except Exception as e:
         logger.error(f"Failed to initialize Supabase client: {e}")

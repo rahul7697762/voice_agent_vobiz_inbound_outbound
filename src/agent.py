@@ -6,6 +6,7 @@ import pytz
 import re
 import random
 import asyncio
+from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -27,6 +28,11 @@ from livekit.agents import (
     llm,
 )
 from livekit.plugins import openai, sarvam, silero
+try:
+    from livekit.plugins import google as google_plugin
+    _GOOGLE_AVAILABLE = True
+except ImportError:
+    _GOOGLE_AVAILABLE = False
 from typing import Annotated
 
 CONFIG_FILE = "config.json"
@@ -83,7 +89,11 @@ from notify import (
     notify_agent_error,
 )
 
-load_dotenv()
+# Load .env.local from the project root (one level up from src/)
+_env_path = Path(__file__).resolve().parent.parent / ".env.local"
+if not _env_path.exists():
+    _env_path = Path(__file__).resolve().parent.parent / ".env"
+load_dotenv(dotenv_path=_env_path)
 logger = logging.getLogger("outbound-agent")
 logging.basicConfig(level=logging.INFO)
 
@@ -361,6 +371,37 @@ async def entrypoint(ctx: JobContext):
         sentences = re.split(r'(?<=[।.!?])\s+', agent_response.strip())
         return sentences[0] if sentences else agent_response
 
+    # ── Pick Gemini fallback model ────────────────────────────────────────
+    _gemini_model_map = {
+        "gpt-4o":      "gemini-2.0-flash",
+        "gpt-4o-mini": "gemini-1.5-flash",
+        "gpt-4-turbo": "gemini-2.5-flash",
+    }
+    gemini_model = _gemini_model_map.get(llm_model, "gemini-1.5-flash")
+    gemini_api_key = os.getenv("GEMINI_API_KEY", "")
+
+    # ── Build LLM with Gemini fallback ────────────────────────────────────
+    primary_llm = openai.LLM(model=llm_model)
+    if gemini_api_key and _GOOGLE_AVAILABLE:
+        fallback_llm = google_plugin.LLM(
+            model=gemini_model,
+            api_key=gemini_api_key,
+        )
+        agent_llm = llm.FallbackAdapter([primary_llm, fallback_llm], attempt_timeout=20.0)
+        logger.info(f"[LLM] OpenAI ({llm_model}) with Gemini fallback ({gemini_model})")
+    elif gemini_api_key:
+        # livekit-plugins-google not installed — use OpenAI-compat endpoint
+        fallback_llm = openai.LLM(
+            model=gemini_model,
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+            api_key=gemini_api_key,
+        )
+        agent_llm = llm.FallbackAdapter([primary_llm, fallback_llm], attempt_timeout=20.0)
+        logger.warning("[LLM] Using OpenAI-compat Gemini (install livekit-plugins-google for better support)")
+    else:
+        agent_llm = primary_llm
+        logger.warning("[LLM] No GEMINI_API_KEY set — no fallback configured")
+
     # ── Start Sarvam-powered session ──────────────────────────────────────
     session = AgentSession(
         stt=sarvam.STT(
@@ -369,16 +410,14 @@ async def entrypoint(ctx: JobContext):
             mode="translate",
             flush_signal=True,
         ),
-        llm=openai.LLM(
-            model=llm_model,
-        ),
+        llm=agent_llm,
         tts=sarvam.TTS(
             target_language_code=tts_language,
             model="bulbul:v3",
             speaker=tts_voice,
         ),
         turn_detection="stt",
-        min_endpointing_delay=0.07,
+        min_endpointing_delay=0.5,   # 0.07 was too aggressive — caused double-triggers
         allow_interruptions=True,
     )
 
@@ -510,6 +549,12 @@ async def entrypoint(ctx: JobContext):
                 )
                 logger.info("Post-call booking executed and notification sent.")
                 booking_status_msg = f"Booking Confirmed: {result.get('booking_id')}"
+            elif result.get("conflict"):
+                # Slot was taken — surface alternatives in the summary
+                alts = result.get("alternatives", [])
+                alts_str = ", ".join(alts) if alts else "none found"
+                logger.warning(f"[BOOKING] Slot conflict. Alternatives: {alts_str}")
+                booking_status_msg = f"Booking Failed (conflict): Alternatives: {alts_str}"
             else:
                 logger.error(f"Failed to execute post-call booking: {result.get('message')}")
                 booking_status_msg = f"Booking Failed: {result.get('message')}"
@@ -566,13 +611,17 @@ async def entrypoint(ctx: JobContext):
                 logger.warning(f"[RECORDING] Failed to stop egress: {e}")
 
         from db import save_call_log
-        save_call_log(
-            phone=caller_phone,
-            duration=duration,
-            transcript=transcript_text,
-            summary=booking_status_msg,
-            recording_url=recording_url,
-            caller_name=agent_tools.caller_name or "",
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: save_call_log(
+                phone=caller_phone,
+                duration=duration,
+                transcript=transcript_text,
+                summary=booking_status_msg,
+                recording_url=recording_url,
+                caller_name=agent_tools.caller_name or "",
+            )
         )
 
     ctx.add_shutdown_callback(unified_shutdown_hook)

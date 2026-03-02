@@ -7,7 +7,11 @@ from dotenv import load_dotenv
 from livekit import api
 
 # Load environment variables
-load_dotenv(".env")
+from pathlib import Path
+_env_path = Path(__file__).resolve().parent.parent / ".env.local"
+if not _env_path.exists():
+    _env_path = Path(__file__).resolve().parent.parent / ".env"
+load_dotenv(dotenv_path=_env_path)
 
 async def main():
     parser = argparse.ArgumentParser(description="Make an outbound call via LiveKit Agent.")
@@ -50,14 +54,14 @@ async def main():
         
         dispatch = await lk_api.agent_dispatch.create_dispatch(dispatch_request)
 
-        print("\n✅ Call Dispatched Successfully!")
+        print("\n[OK] Call Dispatched Successfully!")
         print(f"Dispatch ID: {dispatch.id}")
         print("-" * 40)
         print("The agent is now joining the room and will dial the number.")
         print("Check your agent terminal for logs.")
         
     except Exception as e:
-        print(f"\n❌ Error dispatching call: {e}")
+        print(f"\n[ERROR] Error dispatching call: {e}")
     
     finally:
         await lk_api.aclose()

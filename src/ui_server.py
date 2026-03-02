@@ -1,11 +1,17 @@
 import json
 import logging
 import os
+from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse
 from dotenv import load_dotenv
 
-load_dotenv()
+# Load .env.local from project root (one level up from src/), fallback to .env
+_root = Path(__file__).resolve().parent.parent
+_env_path = _root / ".env.local"
+if not _env_path.exists():
+    _env_path = _root / ".env"
+load_dotenv(dotenv_path=_env_path)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ui-server")
@@ -899,4 +905,7 @@ loadDashboard();
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("ui_server:app", host="0.0.0.0", port=8000, reload=True)
+    import os
+    port = int(os.environ.get("PORT", 8000))
+    # In supervisor it is run as python src/ui_server.py from /app
+    uvicorn.run("ui_server:app", host="0.0.0.0", port=port)
