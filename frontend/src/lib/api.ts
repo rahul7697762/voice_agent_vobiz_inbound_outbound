@@ -2,8 +2,8 @@ import axios from "axios";
 
 const api = axios.create({
     // In development, Vite will proxy /api requests to http://localhost:8000
-    // In production, this will relative to the deployed server
-    baseURL: "/api",
+    // In production, this will relative to the deployed server or use VITE_API_URL
+    baseURL: import.meta.env.VITE_API_URL || "/api",
 });
 
 export const fetchConfig = () => api.get("/config").then(res => res.data);
