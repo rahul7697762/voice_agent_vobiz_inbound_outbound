@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
 # Load .env.local from project root (one level up from src/), fallback to .env
@@ -17,6 +18,15 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ui-server")
 
 app = FastAPI(title="Med Spa AI Dashboard")
+
+# Allow external websites to call the API (CORS)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],        # Allow all origins (or restrict to specific domains)
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 CONFIG_FILE = "config.json"
 
@@ -448,6 +458,64 @@ async def api_get_contacts():
         logger.error(f"Error fetching contacts: {e}")
         return []
 
+# ── Outbound Call Endpoint ─────────────────────────────────────────────────────
+
+@app.post("/api/call/outbound")
+async def api_outbound_call(request: Request):
+    """Trigger an outbound call via the LiveKit voice agent."""
+    from fastapi import HTTPException
+    import json as _json
+    import time
+
+    data = await request.json()
+    phone_number = data.get("phone_number", "").strip()
+    caller_name = data.get("name", "Outbound Caller").strip()
+
+    if not phone_number:
+        raise HTTPException(status_code=400, detail="phone_number is required.")
+
+    # Ensure +91 prefix for Indian numbers
+    if not phone_number.startswith("+"):
+        phone_number = "+91" + phone_number.lstrip("0")
+
+    config = read_config()
+    lk_url    = config.get("livekit_url", "") or os.getenv("LIVEKIT_URL", "")
+    lk_key    = config.get("livekit_api_key", "") or os.getenv("LIVEKIT_API_KEY", "")
+    lk_secret = config.get("livekit_api_secret", "") or os.getenv("LIVEKIT_API_SECRET", "")
+
+    if not lk_url or not lk_key or not lk_secret:
+        raise HTTPException(status_code=500, detail="LiveKit credentials not configured.")
+
+    try:
+        from livekit.api import LiveKitAPI, CreateAgentDispatchRequest
+
+        room_name = f"outbound-{phone_number.replace('+', '')}-{int(time.time())}"
+
+        lk_client = LiveKitAPI(url=lk_url, api_key=lk_key, api_secret=lk_secret)
+        dispatch = await lk_client.agent_dispatch.create_dispatch(
+            CreateAgentDispatchRequest(
+                agent_name="outbound-caller",
+                room=room_name,
+                metadata=_json.dumps({
+                    "phone_number": phone_number,
+                    "name": caller_name,
+                }),
+            )
+        )
+        dispatch_id = dispatch.dispatch_id if hasattr(dispatch, "dispatch_id") else str(dispatch)
+        await lk_client.aclose()
+
+        logger.info(f"[OUTBOUND] Dispatched call to {phone_number} in room {room_name}")
+        return {
+            "status": "success",
+            "message": f"Call initiated to {phone_number}",
+            "room_name": room_name,
+            "dispatch_id": dispatch_id,
+        }
+    except Exception as e:
+        logger.error(f"[OUTBOUND] Failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # ── Main Dashboard HTML ────────────────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
@@ -672,6 +740,8 @@ async def get_dashboard():
     <div class="nav-item" onclick="goTo('agent', this)"><span class="icon">🤖</span> Agent Settings</div>
     <div class="nav-item" onclick="goTo('models', this)"><span class="icon">🎙️</span> Models & Voice</div>
     <div class="nav-item" onclick="goTo('credentials', this)"><span class="icon">🔑</span> API Credentials</div>
+    <div class="nav-section" style="margin-top:12px;">Actions</div>
+    <div class="nav-item" onclick="goTo('outbound', this)"><span class="icon">📱</span> Outbound Call</div>
     <div class="nav-section" style="margin-top:12px;">Data</div>
     <div class="nav-item" onclick="goTo('logs', this); loadLogs();"><span class="icon">📞</span> Call Logs</div>
     <div class="nav-item" onclick="goTo('crm', this); loadCRM();"><span class="icon">👥</span> CRM Contacts</div>
@@ -707,6 +777,37 @@ async def get_dashboard():
           <tbody id="dash-table-body"><tr><td colspan="5" style="text-align:center;padding:24px;color:var(--muted);">Loading...</td></tr></tbody>
         </table>
       </div>
+    </div>
+  </div>
+
+  <!-- ── Outbound Call ── -->
+  <div id="page-outbound" class="page">
+    <div class="page-header">
+      <div class="page-title">📱 Outbound Call</div>
+      <div class="page-sub">Trigger AI-powered outbound calls to any phone number</div>
+    </div>
+    <div class="section-card" style="max-width:560px;">
+      <div class="section-title">Make a Call</div>
+      <div class="form-group">
+        <label>Phone Number</label>
+        <div style="display:flex;gap:10px;">
+          <input type="text" id="outbound-phone" placeholder="+919876543210 or 9876543210" style="flex:1;font-size:16px;padding:12px 14px;letter-spacing:1px;">
+          <button class="btn btn-primary" id="outbound-btn" onclick="makeOutboundCall()" style="padding:12px 24px;font-size:14px;white-space:nowrap;">
+            📞 Call Now
+          </button>
+        </div>
+        <div class="hint">Enter with +91 prefix or just the 10-digit number. The AI agent will call and converse.</div>
+      </div>
+      <div class="form-group">
+        <label>Caller Name (optional)</label>
+        <input type="text" id="outbound-name" placeholder="Customer name" value="">
+        <div class="hint">Optional — helps the agent personalize the call.</div>
+      </div>
+    </div>
+    <div id="outbound-status" style="margin-top:16px;max-width:560px;"></div>
+    <div class="section-card" style="margin-top:24px;">
+      <div class="section-title">Recent Outbound Calls</div>
+      <div id="outbound-history" style="color:var(--muted);font-size:13px;">No calls made yet this session.</div>
     </div>
   </div>
 
@@ -1169,6 +1270,69 @@ async function saveConfig(section) {{
   }} else {{
     alert('Failed to save. Check server logs.');
   }}
+}}
+
+// ── Outbound Call ───────────────────────────────────────────────────────────
+let outboundHistory = [];
+
+async function makeOutboundCall() {{
+  const phoneEl = document.getElementById('outbound-phone');
+  const nameEl = document.getElementById('outbound-name');
+  const btn = document.getElementById('outbound-btn');
+  const statusDiv = document.getElementById('outbound-status');
+  const phone = phoneEl.value.trim();
+
+  if (!phone) {{
+    statusDiv.innerHTML = '<div style="padding:14px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:10px;color:#ef4444;font-size:13px;">⚠️ Please enter a phone number.</div>';
+    return;
+  }}
+
+  btn.disabled = true;
+  btn.innerHTML = '⏳ Calling...';
+  statusDiv.innerHTML = '<div style="padding:14px;background:var(--accent-glow);border:1px solid var(--accent);border-radius:10px;color:var(--accent);font-size:13px;">📞 Initiating call to ' + phone + '...</div>';
+
+  try {{
+    const res = await fetch('/api/call/outbound', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{
+        phone_number: phone,
+        name: nameEl.value.trim() || 'Outbound Caller',
+      }}),
+    }});
+    const data = await res.json();
+
+    if (res.ok) {{
+      statusDiv.innerHTML = '<div style="padding:14px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);border-radius:10px;color:#22c55e;font-size:13px;">✅ ' + data.message + '<br><span style="font-size:11px;color:var(--muted);">Room: ' + data.room_name + '</span></div>';
+      outboundHistory.unshift({{ phone, name: nameEl.value.trim(), time: new Date().toLocaleTimeString('en-IN'), room: data.room_name }});
+      renderOutboundHistory();
+      phoneEl.value = '';
+    }} else {{
+      statusDiv.innerHTML = '<div style="padding:14px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:10px;color:#ef4444;font-size:13px;">❌ ' + (data.detail || 'Call failed') + '</div>';
+    }}
+  }} catch(e) {{
+    statusDiv.innerHTML = '<div style="padding:14px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:10px;color:#ef4444;font-size:13px;">❌ Network error: ' + e.message + '</div>';
+  }}
+
+  btn.disabled = false;
+  btn.innerHTML = '📞 Call Now';
+}}
+
+function renderOutboundHistory() {{
+  const el = document.getElementById('outbound-history');
+  if (!outboundHistory.length) {{
+    el.innerHTML = 'No calls made yet this session.';
+    return;
+  }}
+  el.innerHTML = outboundHistory.map(h => `
+    <div style="padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:10px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;">
+      <div>
+        <span style="font-weight:600;color:var(--text);">${{h.phone}}</span>
+        ${{h.name ? '<span style="color:var(--muted);margin-left:8px;">(' + h.name + ')</span>' : ''}}
+      </div>
+      <div style="font-size:11px;color:var(--muted);">${{h.time}}</div>
+    </div>
+  `).join('');
 }}
 
 // ── Boot ────────────────────────────────────────────────────────────────────
