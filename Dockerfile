@@ -1,19 +1,26 @@
-FROM python:3.11-slim
+version: "3.9"
 
-# Install system libs needed by silero/onnxruntime
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    libgomp1 \
-    && rm -rf /var/lib/apt/lists/*
+services:
+  # ── Voice Agent Worker ────────────────────────────────────────────────────
+  voice-agent:
+    build: .
+    command: python src/voice_agent.py start
+    restart: always
+    env_file:
+      - .env
+    environment:
+      - PYTHONUNBUFFERED=1
 
-WORKDIR /app
-
-# Install Python deps first (cache-efficient)
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy project source
-COPY . .
-
-# Default: run the voice agent worker
-CMD ["python", "src/voice_agent.py", "start"]
+  # ── UI / API Server ───────────────────────────────────────────────────────
+  ui-server:
+    build: .
+    command: python src/main.py
+    restart: always
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      - voice-agent
