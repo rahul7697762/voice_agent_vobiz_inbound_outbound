@@ -59,26 +59,26 @@ export default function Calendar() {
     return (
         <div className="p-8 pb-20 max-w-7xl mx-auto">
             <div className="mb-8">
-                <h1 className="text-2xl font-bold text-slate-100">Booking Calendar</h1>
-                <p className="text-sm text-slate-400 mt-1">View confirmed appointments by date</p>
+                <h1 className="text-2xl font-bold text-slate-900">Booking Calendar</h1>
+                <p className="text-sm text-slate-500 mt-1">View confirmed appointments by date</p>
             </div>
 
-            <div className="bg-[#1c2333] border border-[#2a3448] rounded-xl p-6 shadow-lg">
+            <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
                 <div className="flex items-center justify-between mb-6">
-                    <Button variant="ghost" size="sm" onClick={() => changeMonth(-1)} className="text-slate-400 hover:text-slate-100">
+                    <Button variant="ghost" size="sm" onClick={() => changeMonth(-1)} className="text-slate-500 hover:text-slate-900 hover:bg-slate-100">
                         <ChevronLeft className="w-4 h-4 mr-1" /> Prev
                     </Button>
-                    <div className="text-lg font-bold text-slate-100">
+                    <div className="text-lg font-bold text-slate-900">
                         {format(currentDate, "MMMM yyyy")}
                     </div>
-                    <Button variant="ghost" size="sm" onClick={() => changeMonth(1)} className="text-slate-400 hover:text-slate-100">
+                    <Button variant="ghost" size="sm" onClick={() => changeMonth(1)} className="text-slate-500 hover:text-slate-900 hover:bg-slate-100">
                         Next <ChevronRight className="w-4 h-4 ml-1" />
                     </Button>
                 </div>
 
                 <div className="grid grid-cols-7 gap-1.5">
                     {weekDays.map(d => (
-                        <div key={d} className="text-center text-[11px] font-semibold text-slate-400 uppercase tracking-wider py-2">
+                        <div key={d} className="text-center text-[11px] font-semibold text-slate-500 uppercase tracking-wider py-2">
                             {d}
                         </div>
                     ))}
@@ -95,11 +95,11 @@ export default function Calendar() {
                                 onClick={() => handleDayClick(day)}
                                 className={`
                   min-h-[80px] p-2.5 rounded-xl border flex flex-col items-start transition-all relative text-left
-                  ${!isCurrentMonth ? "opacity-30 bg-[#1c2333]/50 border-transparent" : "bg-[#1c2333] border-[#2a3448] hover:border-[#6c63ff] hover:bg-[#6c63ff]/10 hover:scale-[1.03] hover:shadow-[0_4px_20px_rgba(108,99,255,0.15)] z-10"}
+                  ${!isCurrentMonth ? "opacity-40 bg-slate-50 border-transparent" : "bg-white border-slate-200 hover:border-[#6c63ff] hover:bg-[#6c63ff]/5 hover:shadow-md z-10"}
                   ${isTodayDate ? "border-[#6c63ff] shadow-[0_0_0_2px_rgba(108,99,255,0.18)]" : ""}
                 `}
                             >
-                                <div className={`text-[13px] font-bold ${isTodayDate ? "text-[#6c63ff]" : "text-slate-200"}`}>
+                                <div className={`text-[13px] font-bold ${isTodayDate ? "text-[#6c63ff]" : "text-slate-700"}`}>
                                     {format(day, "d")}
                                 </div>
                                 {dayBookings.length > 0 && (
@@ -117,26 +117,26 @@ export default function Calendar() {
             </div>
 
             <Dialog open={modalOpen} onOpenChange={setModalOpen}>
-                <DialogContent className="bg-[#1c2333] border-[#2a3448] text-slate-200 sm:max-w-md">
+                <DialogContent className="bg-white border-slate-200 text-slate-900 sm:max-w-md shadow-lg">
                     <DialogHeader>
-                        <DialogTitle className="text-lg font-bold text-slate-100">
+                        <DialogTitle className="text-lg font-bold text-slate-900">
                             {selectedDate ? format(selectedDate, "EEEE, MMMM d, yyyy") : ""}
                         </DialogTitle>
-                        <DialogDescription className="text-slate-400">
+                        <DialogDescription className="text-slate-500">
                             {selectedBookings.length ? `${selectedBookings.length} booking${selectedBookings.length > 1 ? 's' : ''} on this day` : 'No bookings on this day'}
                         </DialogDescription>
                     </DialogHeader>
 
                     <div className="max-h-[60vh] overflow-y-auto pr-2 pb-2 mt-2 space-y-3">
                         {selectedBookings.length === 0 ? (
-                            <div className="text-center p-8 text-sm text-slate-400">
+                            <div className="text-center p-8 text-sm text-slate-500">
                                 📅 No bookings on this day.
                             </div>
                         ) : (
                             selectedBookings.map((b, i) => (
-                                <div key={b.id || i} className="p-3.5 bg-[#0f1117] border border-[#2a3448] rounded-xl hover:border-[#6c63ff] transition-colors">
+                                <div key={b.id || i} className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl hover:border-[#6c63ff] transition-colors shadow-sm">
                                     <div className="flex items-center justify-between mb-1.5">
-                                        <div className="font-bold text-[14px] flex items-center text-slate-200">
+                                        <div className="font-bold text-[14px] flex items-center text-slate-800">
                                             <Phone className="w-3.5 h-3.5 mr-1.5 text-slate-400" />
                                             {b.phone_number || 'Unknown'}
                                         </div>
@@ -144,11 +144,11 @@ export default function Calendar() {
                                             ✅ Booked
                                         </span>
                                     </div>
-                                    <div className="text-[12px] text-slate-400 mb-2">
+                                    <div className="text-[12px] text-slate-500 mb-2">
                                         🕐 {new Date(b.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
                                     </div>
                                     {b.summary && (
-                                        <div className="text-[12px] text-slate-300 p-2 bg-white/5 rounded-md leading-relaxed">
+                                        <div className="text-[12px] text-slate-600 p-2 bg-white rounded-md border border-slate-100 shadow-sm leading-relaxed">
                                             💬 {b.summary}
                                         </div>
                                     )}

@@ -1,4 +1,6 @@
+import asyncio
 import os
+import sys
 import json
 import logging
 import certifi
@@ -9,6 +11,13 @@ import asyncio
 from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
+load_dotenv()
+
+
+# Add src/ to python path so we can import calendar_tools, notify, db
+
+src_dir = Path(__file__).resolve().parent.parent
+sys.path.append(str(src_dir))
 
 # Fix for macOS SSL certificate verification
 os.environ["SSL_CERT_FILE"] = certifi.where()
@@ -35,7 +44,7 @@ except ImportError:
     _GOOGLE_AVAILABLE = False
 from typing import Annotated
 
-CONFIG_FILE = "config.json"
+CONFIG_FILE = str(src_dir / "config.json")
 
 def get_live_config():
     """Reads the latest config.json to inject dynamic prompts and VAD tuning."""
@@ -89,10 +98,10 @@ from notify import (
     notify_agent_error,
 )
 
-# Load .env.local from the project root (one level up from src/)
-_env_path = Path(__file__).resolve().parent.parent / ".env.local"
+# Load .env.local from the project root
+_env_path = src_dir.parent / ".env.local"
 if not _env_path.exists():
-    _env_path = Path(__file__).resolve().parent.parent / ".env"
+    _env_path = src_dir.parent / ".env"
 load_dotenv(dotenv_path=_env_path)
 logger = logging.getLogger("outbound-agent")
 logging.basicConfig(level=logging.INFO)
@@ -269,25 +278,37 @@ async def entrypoint(ctx: JobContext):
     call_type    = "inbound"
     raw_meta     = ctx.job.metadata or ""
     caller_name  = "Unknown"
+    is_agent_creation = False
 
     if raw_meta.strip():
         try:
             meta = json.loads(raw_meta)
-            phone_number = (
-                meta.get("phone_number")
-                or meta.get("to")
-                or meta.get("destination")
-            )
-            caller_name = meta.get("name", caller_name)
-            if phone_number:
-                call_type = "outbound"
-                logger.info(f"[CALL] Outbound → {phone_number}")
+            # Check if this is a dispatch just to start/register a new agent instance
+            if "agent_name" in meta and not meta.get("phone_number") and not meta.get("to"):
+                is_agent_creation = True
+                logger.info(f"[AGENT CREATION] Spun up new agent instance for config: {meta.get('agent_name')}")
+            else:
+                phone_number = (
+                    meta.get("phone_number")
+                    or meta.get("to")
+                    or meta.get("destination")
+                )
+                caller_name = meta.get("name", caller_name)
+                if phone_number:
+                    call_type = "outbound"
+                    logger.info(f"[CALL] Outbound → {phone_number}")
         except (json.JSONDecodeError, TypeError) as e:
             logger.warning(f"[METADATA] Parse error: {e} — treating as inbound")
+
+    # If this was purely an agent creation dispatch (no phone to call), we can wait for inbound connections
+    # but LiveKit jobs usually expect a participant. We will connect and wait.
 
     # ── Connect to LiveKit room ────────────────────────────────────────────
     await ctx.connect()
     logger.info(f"[ROOM] Connected: {ctx.room.name}")
+
+    if is_agent_creation:
+        logger.info("[AGENT CREATION] Waiting in room for inbound connections or SIP participants...")
 
     # ── Outbound: dial via Vobiz SIP trunk ────────────────────────────────
     if call_type == "outbound" and phone_number:
@@ -337,20 +358,20 @@ async def entrypoint(ctx: JobContext):
 
     # ── Read live configuration ───────────────────────────────────────────
     live_config = get_live_config()
-    delay_setting = live_config.get("stt_min_endpointing_delay", 0.15)
+    delay_setting = live_config.get("stt_min_endpointing_delay", 0.5)
     llm_model = live_config.get("llm_model", "gpt-4o-mini")
     tts_voice = live_config.get("tts_voice", "rohan")
     tts_language = live_config.get("tts_language", "hi-IN")
     first_line = live_config.get("first_line", "")
 
-    # ── Build agent ───────────────────────────────────────────────────────
-    agent = OutboundAssistant(agent_tools=agent_tools, first_line=first_line)
-
-    # Override OS environment variables if they are set in the UI dashboard
+    # ── Override OS environment variables FIRST so all plugins pick up the right keys ──
     for key in ["LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "OPENAI_API_KEY", "SARVAM_API_KEY", "CAL_API_KEY", "TELEGRAM_BOT_TOKEN", "SUPABASE_URL", "SUPABASE_KEY"]:
         val = live_config.get(key.lower(), "")
         if val:
             os.environ[key] = val
+
+    # ── Build agent ───────────────────────────────────────────────────────
+    agent = OutboundAssistant(agent_tools=agent_tools, first_line=first_line)
 
     # --- Interruption state tracking ---
     global agent_is_speaking
@@ -410,14 +431,14 @@ async def entrypoint(ctx: JobContext):
             mode="translate",
             flush_signal=True,
         ),
+        vad=silero.VAD.load(min_silence_duration=delay_setting),
         llm=agent_llm,
         tts=sarvam.TTS(
             target_language_code=tts_language,
             model="bulbul:v3",
             speaker=tts_voice,
         ),
-        turn_detection="stt",
-        min_endpointing_delay=0.5,   # 0.07 was too aggressive — caused double-triggers
+        min_endpointing_delay=delay_setting,
         allow_interruptions=True,
     )
 
@@ -436,35 +457,41 @@ async def entrypoint(ctx: JobContext):
     # Requires: SUPABASE_S3_ACCESS_KEY, SUPABASE_S3_SECRET_KEY, SUPABASE_S3_ENDPOINT
     # Set these in Coolify/env after creating the 'call-recordings' Supabase bucket.
     egress_id = None
-    try:
-        rec_api = api.LiveKitAPI(
-            url=os.environ["LIVEKIT_URL"],
-            api_key=os.environ["LIVEKIT_API_KEY"],
-            api_secret=os.environ["LIVEKIT_API_SECRET"],
-        )
-        egress_resp = await rec_api.egress.start_room_composite_egress(
-            api.RoomCompositeEgressRequest(
-                room_name=ctx.room.name,
-                audio_only=True,
-                file_outputs=[api.EncodedFileOutput(
-                    file_type=api.EncodedFileType.OGG,
-                    filepath=f"recordings/{ctx.room.name}.ogg",
-                    s3=api.S3Upload(
-                        access_key=os.environ["SUPABASE_S3_ACCESS_KEY"],
-                        secret=os.environ["SUPABASE_S3_SECRET_KEY"],
-                        bucket="call-recordings",
-                        region=os.environ.get("SUPABASE_S3_REGION", "ap-south-1"),
-                        endpoint=os.environ["SUPABASE_S3_ENDPOINT"],
-                        force_path_style=True,
-                    )
-                )]
+    _rec_s3_key = os.environ.get("SUPABASE_S3_ACCESS_KEY", "")
+    _rec_s3_secret = os.environ.get("SUPABASE_S3_SECRET_KEY", "")
+    _rec_s3_endpoint = os.environ.get("SUPABASE_S3_ENDPOINT", "")
+    if _rec_s3_key and _rec_s3_secret and _rec_s3_endpoint:
+        try:
+            rec_api = api.LiveKitAPI(
+                url=os.environ["LIVEKIT_URL"],
+                api_key=os.environ["LIVEKIT_API_KEY"],
+                api_secret=os.environ["LIVEKIT_API_SECRET"],
             )
-        )
-        egress_id = egress_resp.egress_id
-        await rec_api.aclose()
-        logger.info(f"[RECORDING] Started egress: {egress_id}")
-    except Exception as e:
-        logger.warning(f"[RECORDING] Failed to start recording: {e}")
+            egress_resp = await rec_api.egress.start_room_composite_egress(
+                api.RoomCompositeEgressRequest(
+                    room_name=ctx.room.name,
+                    audio_only=True,
+                    file_outputs=[api.EncodedFileOutput(
+                        file_type=api.EncodedFileType.OGG,
+                        filepath=f"recordings/{ctx.room.name}.ogg",
+                        s3=api.S3Upload(
+                            access_key=_rec_s3_key,
+                            secret=_rec_s3_secret,
+                            bucket="call-recordings",
+                            region=os.environ.get("SUPABASE_S3_REGION", "ap-south-1"),
+                            endpoint=_rec_s3_endpoint,
+                            force_path_style=True,
+                        )
+                    )]
+                )
+            )
+            egress_id = egress_resp.egress_id
+            await rec_api.aclose()
+            logger.info(f"[RECORDING] Started egress: {egress_id}")
+        except Exception as e:
+            logger.warning(f"[RECORDING] Failed to start recording: {e}")
+    else:
+        logger.info("[RECORDING] S3 credentials not set — skipping recording.")
 
     @session.on("agent_speech_started")
     def _agent_speech_started(ev):
@@ -598,31 +625,47 @@ async def entrypoint(ctx: JobContext):
                     api_key=os.environ["LIVEKIT_API_KEY"],
                     api_secret=os.environ["LIVEKIT_API_SECRET"],
                 )
-                await stop_api.egress.stop_egress(
-                    api.StopEgressRequest(egress_id=egress_id)
+                # Fetch egress info first — only stop it if not already finished/failed
+                egress_list = await stop_api.egress.list_egress(
+                    api.ListEgressRequest(egress_id=egress_id)
                 )
+                if egress_list.items:
+                    state = egress_list.items[0].status
+                    from livekit.protocol.egress import EgressStatus
+                    active_states = {
+                        EgressStatus.EGRESS_STARTING,
+                        EgressStatus.EGRESS_ACTIVE,
+                    }
+                    if state in active_states:
+                        await stop_api.egress.stop_egress(
+                            api.StopEgressRequest(egress_id=egress_id)
+                        )
+                        recording_url = (
+                            f"{os.environ.get('SUPABASE_URL', '')}/storage/v1/object/public/"
+                            f"call-recordings/recordings/{ctx.room.name}.ogg"
+                        )
+                        logger.info(f"[RECORDING] Stopped. URL: {recording_url}")
+                    else:
+                        logger.warning(f"[RECORDING] Egress already in state {state} — skipping stop.")
                 await stop_api.aclose()
-                recording_url = (
-                    f"{os.environ.get('SUPABASE_URL', '')}/storage/v1/object/public/"
-                    f"call-recordings/recordings/{ctx.room.name}.ogg"
-                )
-                logger.info(f"[RECORDING] Stopped. URL: {recording_url}")
             except Exception as e:
                 logger.warning(f"[RECORDING] Failed to stop egress: {e}")
 
+        # ── Save call log to Supabase (sync, in thread) ────────────────────────
         from db import save_call_log
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(
-            None,
-            lambda: save_call_log(
-                phone=caller_phone,
-                duration=duration,
-                transcript=transcript_text,
-                summary=booking_status_msg,
-                recording_url=recording_url,
-                caller_name=agent_tools.caller_name or "",
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            await asyncio.get_event_loop().run_in_executor(
+                pool,
+                lambda: save_call_log(
+                    phone=caller_phone,
+                    duration=duration,
+                    transcript=transcript_text,
+                    summary=booking_status_msg,
+                    recording_url=recording_url,
+                    caller_name=agent_tools.caller_name or "",
+                )
             )
-        )
 
     ctx.add_shutdown_callback(unified_shutdown_hook)
 

@@ -48,6 +48,8 @@ def read_config():
         "telegram_chat_id": get_val("telegram_chat_id", "TELEGRAM_CHAT_ID", ""),
         "supabase_url": get_val("supabase_url", "SUPABASE_URL", ""),
         "supabase_key": get_val("supabase_key", "SUPABASE_KEY", ""),
+        "vobiz_auth_id": get_val("vobiz_auth_id", "VOBIZ_AUTH_ID", ""),
+        "vobiz_auth_token": get_val("vobiz_auth_token", "VOBIZ_AUTH_TOKEN", ""),
         **config
     }
 
@@ -56,6 +58,19 @@ def write_config(data):
     config.update(data)
     with open(CONFIG_FILE, "w") as f:
         json.dump(config, f, indent=4)
+
+
+# ── Vobiz helpers ─────────────────────────────────────────────────────────────
+
+VOBIZ_BASE = "https://api.vobiz.ai/api"
+
+def _vobiz_headers():
+    config = read_config()
+    auth_id = config.get("vobiz_auth_id", "")
+    auth_token = config.get("vobiz_auth_token", "")
+    if not auth_id or not auth_token:
+        raise ValueError("Vobiz credentials not configured. Add X-Auth-ID and X-Auth-Token in API Credentials.")
+    return {"X-Auth-ID": auth_id, "X-Auth-Token": auth_token, "Content-Type": "application/json"}
 
 # ── API Endpoints ──────────────────────────────────────────────────────────────
 
@@ -70,7 +85,269 @@ async def api_post_config(request: Request):
     logger.info("Configuration updated via UI.")
     return {"status": "success"}
 
+# ── Vobiz Phone Number Endpoints ───────────────────────────────────────────────
+
+@app.get("/api/vobiz/numbers/available")
+async def vobiz_available_numbers(country: str = "US", limit: int = 20, area_code: str = ""):
+    """Fetch available phone numbers from Vobiz inventory."""
+    import httpx
+    try:
+        headers = _vobiz_headers()
+        params = {"country": country, "limit": limit}
+        if area_code:
+            params["area_code"] = area_code
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(f"{VOBIZ_BASE}/phone-numbers/available", headers=headers, params=params)
+            r.raise_for_status()
+            return r.json()
+    except ValueError as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail=str(e))
+    except httpx.HTTPStatusError as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
+    except Exception as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/vobiz/numbers/owned")
+async def vobiz_owned_numbers():
+    """Fetch all phone numbers owned by this Vobiz account."""
+    import httpx
+    try:
+        headers = _vobiz_headers()
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(f"{VOBIZ_BASE}/phone-numbers", headers=headers)
+            r.raise_for_status()
+            return r.json()
+    except ValueError as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail=str(e))
+    except httpx.HTTPStatusError as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
+    except Exception as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/vobiz/numbers/purchase")
+async def vobiz_purchase_number(request: Request):
+    """Purchase a phone number from Vobiz inventory."""
+    import httpx
+    try:
+        body = await request.json()
+        headers = _vobiz_headers()
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.post(f"{VOBIZ_BASE}/phone-numbers", headers=headers, json=body)
+            r.raise_for_status()
+            return r.json()
+    except ValueError as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail=str(e))
+    except httpx.HTTPStatusError as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
+    except Exception as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Agent Management Endpoints ─────────────────────────────────────────────────
+
+AGENTS_FILE = "agents.json"
+
+def read_agents():
+    if os.path.exists(AGENTS_FILE):
+        try:
+            with open(AGENTS_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return []
+
+def save_agent(agent_data: dict):
+    agents = read_agents()
+    # Update if same name, else append
+    for i, a in enumerate(agents):
+        if a.get("name") == agent_data.get("name"):
+            agents[i] = agent_data
+            break
+    else:
+        agents.append(agent_data)
+    with open(AGENTS_FILE, "w") as f:
+        json.dump(agents, f, indent=4)
+
+@app.get("/api/agents")
+async def api_get_agents():
+    """List all agents stored locally."""
+    return read_agents()
+
+@app.post("/api/agents/create")
+async def api_create_agent(request: Request):
+    """
+    Create a new agent:
+    - Stores agent config locally (agents.json)
+    - Updates global config.json with the new agent's voice/model/prompt settings
+    - Creates a LiveKit Agent Dispatch so the running worker is aware
+    """
+    from fastapi import HTTPException
+    data = await request.json()
+
+    name         = data.get("name", "Unnamed Agent")
+    agent_type   = data.get("agent_type", "Conversation Flow")
+    description  = data.get("description", "")
+    voice        = data.get("tts_voice", "kavya")
+    language     = data.get("tts_language", "hi-IN")
+    llm_model    = data.get("llm_model", "gpt-4o-mini")
+    first_line   = data.get("first_line", "")
+    instructions = data.get("agent_instructions", "")
+
+    if not name:
+        raise HTTPException(status_code=400, detail="Agent name is required.")
+
+    import time
+    agent_record = {
+        "id": str(int(time.time())),
+        "name": name,
+        "agent_type": agent_type,
+        "description": description,
+        "tts_voice": voice,
+        "tts_language": language,
+        "llm_model": llm_model,
+        "first_line": first_line,
+        "agent_instructions": instructions,
+        "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+    # 1. Persist agent locally
+    save_agent(agent_record)
+    logger.info(f"[AGENT] Created locally: {name}")
+
+    # 2. Update global config so active worker uses this agent's settings
+    write_config({
+        "tts_voice": voice,
+        "tts_language": language,
+        "llm_model": llm_model,
+        "first_line": first_line,
+        "agent_instructions": instructions,
+    })
+
+    # 3. Try to create a LiveKit Agent Dispatch
+    dispatch_id = None
+    lk_error = None
+    config = read_config()
+    lk_url    = config.get("livekit_url", "") or os.getenv("LIVEKIT_URL", "")
+    lk_key    = config.get("livekit_api_key", "") or os.getenv("LIVEKIT_API_KEY", "")
+    lk_secret = config.get("livekit_api_secret", "") or os.getenv("LIVEKIT_API_SECRET", "")
+
+    if lk_url and lk_key and lk_secret:
+        try:
+            import httpx, base64, json as _json
+            import hmac as _hmac, hashlib as _hashlib, struct as _struct
+            # Use livekit SDK if available
+            from livekit import api as lk_api_mod
+            lk_client = lk_api_mod.LiveKitAPI(
+                url=lk_url,
+                api_key=lk_key,
+                api_secret=lk_secret,
+            )
+            dispatch_req = lk_api_mod.CreateAgentDispatchRequest(
+                agent_name="outbound-caller",
+                room="userdashboard-create",
+                metadata=_json.dumps({
+                    "agent_name": name,
+                    "agent_type": agent_type,
+                    "description": description,
+                }),
+            )
+            dispatch = await lk_client.agent_dispatch.create_dispatch(dispatch_req)
+            dispatch_id = dispatch.dispatch_id if hasattr(dispatch, "dispatch_id") else str(dispatch)
+            await lk_client.aclose()
+            logger.info(f"[LIVEKIT] Dispatch created: {dispatch_id}")
+        except Exception as e:
+            lk_error = str(e)
+            logger.warning(f"[LIVEKIT] Dispatch failed (agent still saved locally): {e}")
+    else:
+        lk_error = "LiveKit credentials not configured. Agent saved locally only."
+        logger.warning("[LIVEKIT] Credentials missing — skipping dispatch.")
+
+    return {
+        "status": "success",
+        "agent": agent_record,
+        "dispatch_id": dispatch_id,
+        "livekit_warning": lk_error,
+    }
+
+@app.get("/api/agent/token")
+async def api_get_agent_token(participant_name: str, room_name: str = "userdashboard-create"):
+    """
+    Generate a LiveKit AccessToken for a web client to join the agent's room.
+    Additionally, dispatches a LiveKit Agent so it joins the room to be tested.
+    """
+    from fastapi import HTTPException
+    config = read_config()
+    lk_key    = config.get("livekit_api_key", "") or os.getenv("LIVEKIT_API_KEY", "")
+    lk_secret = config.get("livekit_api_secret", "") or os.getenv("LIVEKIT_API_SECRET", "")
+    lk_url    = config.get("livekit_url", "") or os.getenv("LIVEKIT_URL", "")
+
+    if not lk_key or not lk_secret or not lk_url:
+        raise HTTPException(status_code=500, detail="LiveKit credentials not configured.")
+
+    try:
+        from livekit.api import AccessToken, VideoGrants, LiveKitAPI, CreateAgentDispatchRequest
+        import json as _json
+        import time
+        
+        # Determine agent configuration for dispatch
+        agents = read_agents()
+        agent_data = next((a for a in agents if a.get("id") == room_name), None)
+        meta_data = {
+            "agent_name": agent_data.get("name", "Test Agent") if agent_data else "Test Agent",
+            "agent_type": agent_data.get("agent_type", "") if agent_data else "",
+            "description": agent_data.get("description", "") if agent_data else "",
+        }
+
+        # Dispatch the agent to the specific test room
+        try:
+            lk_client = LiveKitAPI(url=lk_url, api_key=lk_key, api_secret=lk_secret)
+            dispatch_req = CreateAgentDispatchRequest(
+                agent_name="outbound-caller",
+                room=room_name,
+                metadata=_json.dumps(meta_data),
+            )
+            dispatch = await lk_client.agent_dispatch.create_dispatch(dispatch_req)
+            await lk_client.aclose()
+            logger.info(f"[LIVEKIT] Test Agent Dispatch created: {dispatch.dispatch_id if hasattr(dispatch, 'dispatch_id') else str(dispatch)} for room {room_name}")
+        except Exception as dispatch_e:
+            logger.warning(f"[LIVEKIT] Dispatch failed in test endpoint: {dispatch_e}")
+
+        # Grant permissions to join the specific room and publish audio/data
+        grant = VideoGrants(
+            room_join=True,
+            room=room_name,
+            can_publish=True,
+            can_publish_data=True,
+            can_subscribe=True,
+        )
+        
+        token = (
+            AccessToken(lk_key, lk_secret)
+            .with_identity(f"{participant_name}-{int(time.time())}")
+            .with_name(participant_name)
+            .with_grants(grant)
+            .to_jwt()
+        )
+        
+        return {
+            "token": token,
+            "livekit_url": lk_url
+        }
+    except Exception as e:
+        logger.error(f"Failed to generate LiveKit token or dispatch agent: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/logs")
+
 async def api_get_logs():
     config = read_config()
     os.environ["SUPABASE_URL"] = config.get("supabase_url", "")
@@ -907,5 +1184,5 @@ if __name__ == "__main__":
     import uvicorn
     import os
     port = int(os.environ.get("PORT", 8000))
-    # In supervisor it is run as python src/ui_server.py from /app
-    uvicorn.run("ui_server:app", host="0.0.0.0", port=port)
+    # In supervisor it is run as python src/main.py from /app
+    uvicorn.run("main:app", host="0.0.0.0", port=port)

@@ -7,12 +7,15 @@ import ModelSettings from "./pages/settings/ModelSettings";
 import ApiCredentials from "./pages/settings/ApiCredentials";
 import CallLogs from "./pages/CallLogs";
 import CrmContacts from "./pages/CrmContacts";
+import PhoneNumbers from "./pages/PhoneNumbers";
+import UserDashboard from "./pages/UserDashboard";
 import { Toaster } from "@/components/ui/sonner";
 
 function App() {
   return (
     <Router>
       <Routes>
+        <Route path="/userdashboard" element={<UserDashboard />} />
         <Route path="/" element={<MainLayout />}>
           <Route index element={<Dashboard />} />
           <Route path="calendar" element={<Calendar />} />
@@ -21,9 +24,10 @@ function App() {
           <Route path="settings/credentials" element={<ApiCredentials />} />
           <Route path="logs" element={<CallLogs />} />
           <Route path="crm" element={<CrmContacts />} />
+          <Route path="phone-numbers" element={<PhoneNumbers />} />
         </Route>
       </Routes>
-      <Toaster theme="dark" position="bottom-right" />
+      <Toaster theme="light" position="bottom-right" />
     </Router>
   );
 }

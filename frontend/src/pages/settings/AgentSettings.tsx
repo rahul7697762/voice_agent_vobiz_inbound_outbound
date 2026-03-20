@@ -39,55 +39,55 @@ export default function AgentSettings() {
     return (
         <div className="p-8 pb-24 max-w-4xl mx-auto relative min-h-full">
             <div className="mb-8">
-                <h1 className="text-2xl font-bold text-slate-100">Agent Settings</h1>
-                <p className="text-sm text-slate-400 mt-1">Configure AI personality, opening line, and sensitivity</p>
+                <h1 className="text-2xl font-bold text-slate-900">Agent Settings</h1>
+                <p className="text-sm text-slate-500 mt-1">Configure AI personality, opening line, and sensitivity</p>
             </div>
 
-            <div className="bg-[#1c2333] border border-[#2a3448] rounded-xl p-6 mb-6">
-                <h2 className="text-[14px] font-semibold mb-4 pb-3 border-b border-[#2a3448] text-slate-200">Opening Greeting</h2>
+            <div className="bg-white border border-slate-200 rounded-xl p-6 mb-6 shadow-sm">
+                <h2 className="text-[14px] font-semibold mb-4 pb-3 border-b border-slate-200 text-slate-800">Opening Greeting</h2>
                 <div className="space-y-2">
-                    <Label className="text-xs font-semibold text-slate-400 uppercase tracking-wider">First Line (What the agent says when a call connects)</Label>
+                    <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">First Line (What the agent says when a call connects)</Label>
                     <Input
                         value={config.first_line || ""}
                         onChange={(e: any) => setConfig({ ...config, first_line: e.target.value })}
-                        className="bg-[#0f1117] border-[#2a3448] focus-visible:ring-[#6c63ff] text-slate-200"
+                        className="bg-white border-slate-200 focus-visible:ring-[#6c63ff] text-slate-900 shadow-sm"
                         placeholder="Namaste! Welcome to Daisy's Med Spa..."
                     />
-                    <p className="text-[11.5px] text-slate-400">This is the very first thing the agent says. Keep it concise and warm.</p>
+                    <p className="text-[11.5px] text-slate-500">This is the very first thing the agent says. Keep it concise and warm.</p>
                 </div>
             </div>
 
-            <div className="bg-[#1c2333] border border-[#2a3448] rounded-xl p-6 mb-6">
-                <h2 className="text-[14px] font-semibold mb-4 pb-3 border-b border-[#2a3448] text-slate-200">System Prompt</h2>
+            <div className="bg-white border border-slate-200 rounded-xl p-6 mb-6 shadow-sm">
+                <h2 className="text-[14px] font-semibold mb-4 pb-3 border-b border-slate-200 text-slate-800">System Prompt</h2>
                 <div className="space-y-2">
-                    <Label className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Master System Prompt</Label>
+                    <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Master System Prompt</Label>
                     <Textarea
                         rows={12}
                         value={config.agent_instructions || ""}
                         onChange={(e: any) => setConfig({ ...config, agent_instructions: e.target.value })}
-                        className="bg-[#0f1117] border-[#2a3448] focus-visible:ring-[#6c63ff] font-mono text-xs text-slate-200"
+                        className="bg-white border-slate-200 focus-visible:ring-[#6c63ff] font-mono text-xs text-slate-900 shadow-sm"
                         placeholder="Enter the AI's full personality and instructions..."
                     />
-                    <p className="text-[11.5px] text-slate-400">Date and time context are injected automatically. Do not hardcode today's date.</p>
+                    <p className="text-[11.5px] text-slate-500">Date and time context are injected automatically. Do not hardcode today's date.</p>
                 </div>
             </div>
 
-            <div className="bg-[#1c2333] border border-[#2a3448] rounded-xl p-6 mb-6">
-                <h2 className="text-[14px] font-semibold mb-4 pb-3 border-b border-[#2a3448] text-slate-200">Listening Sensitivity</h2>
+            <div className="bg-white border border-slate-200 rounded-xl p-6 mb-6 shadow-sm">
+                <h2 className="text-[14px] font-semibold mb-4 pb-3 border-b border-slate-200 text-slate-800">Listening Sensitivity</h2>
                 <div className="space-y-2 max-w-[220px]">
-                    <Label className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Endpointing Delay (seconds)</Label>
+                    <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Endpointing Delay (seconds)</Label>
                     <Input
                         type="number"
                         step="0.05" min="0.1" max="3.0"
                         value={config.stt_min_endpointing_delay || 0.6}
                         onChange={(e: any) => setConfig({ ...config, stt_min_endpointing_delay: e.target.value })}
-                        className="bg-[#0f1117] border-[#2a3448] focus-visible:ring-[#6c63ff] text-slate-200"
+                        className="bg-white border-slate-200 focus-visible:ring-[#6c63ff] text-slate-900 shadow-sm"
                     />
-                    <p className="text-[11.5px] text-slate-400">Seconds the AI waits after silence before responding. Default: 0.6</p>
+                    <p className="text-[11.5px] text-slate-500">Seconds the AI waits after silence before responding. Default: 0.6</p>
                 </div>
             </div>
 
-            <div className="fixed bottom-0 left-60 right-0 bg-[#161b27]/95 backdrop-blur-md border-t border-[#2a3448] px-8 py-4 flex items-center justify-end z-20">
+            <div className="fixed bottom-0 left-60 right-0 bg-white/95 backdrop-blur-md border-t border-slate-200 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] px-8 py-4 flex items-center justify-end z-20">
                 <Button onClick={handleSave} disabled={saving} className="bg-[#6c63ff] hover:bg-[#5a52e0] text-white">
                     {saving ? "Saving..." : "💾 Save Agent Settings"}
                 </Button>

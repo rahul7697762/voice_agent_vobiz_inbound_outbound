@@ -1,0 +1,26 @@
+[
+    {
+        "id": "1772872900",
+        "name": "RAHUL",
+        "agent_type": "Appointment Booking",
+        "description": "",
+        "tts_voice": "kavya",
+        "tts_language": "hi-IN",
+        "llm_model": "gpt-4o-mini",
+        "first_line": "Namaste \u2728 Welcome to Bitlance Tech Hub \u2014 kya aap AI agent, automation, ya website development service ke baare mein explore karna chahte hain? Great, kya aap is week ek quick demo schedule kar lein \u2014 weekday prefer karein ge ya weekend?",
+        "agent_instructions": "Namaste \u2728 Welcome to Bitlance Tech Hub \u2014 kya aap AI agent, automation, ya website development service ke baare mein explore karna chahte hain? Great, kya aap is week ek quick demo schedule kar lein \u2014 weekday prefer karein ge ya weekend?",
+        "created_at": "2026-03-07 14:11:40"
+    },
+    {
+        "id": "1772873497",
+        "name": "Rahul Saini",
+        "agent_type": "Information Retrieval",
+        "description": "",
+        "tts_voice": "kavya",
+        "tts_language": "hi-IN",
+        "llm_model": "gpt-4o-mini",
+        "first_line": "Namaste \u2728 Welcome to Bitlance Tech Hub \u2014 kya aap AI agent, automation, ya website development service ke baare mein explore karna chahte hain? Great, kya aap is week ek quick demo schedule kar lein \u2014 weekday prefer karein ge ya weekend?",
+        "agent_instructions": "",
+        "created_at": "2026-03-07 14:21:37"
+    }
+]

@@ -15,4 +15,11 @@ export const fetchContacts = () => api.get("/contacts").then(res => res.data);
 
 export const getTranscriptUrl = (logId: string) => `/api/logs/${logId}/transcript`;
 
+// Vobiz Phone Number APIs
+export const fetchOwnedNumbers = () => api.get("/vobiz/numbers/owned").then(res => res.data);
+export const fetchAvailableNumbers = (country: string, limit = 20, areaCode = "") =>
+    api.get("/vobiz/numbers/available", { params: { country, limit, area_code: areaCode } }).then(res => res.data);
+export const purchaseNumber = (body: Record<string, any>) =>
+    api.post("/vobiz/numbers/purchase", body).then(res => res.data);
+
 export default api;
