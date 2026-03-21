@@ -470,6 +470,8 @@ async def api_outbound_call(request: Request):
     data = await request.json()
     phone_number = data.get("phone_number", "").strip()
     caller_name = data.get("name", "Outbound Caller").strip()
+    custom_instructions = data.get("instructions", "").strip()
+    custom_first_line = data.get("first_line", "").strip()
 
     if not phone_number:
         raise HTTPException(status_code=400, detail="phone_number is required.")
@@ -499,6 +501,8 @@ async def api_outbound_call(request: Request):
                 metadata=_json.dumps({
                     "phone_number": phone_number,
                     "name": caller_name,
+                    "instructions": custom_instructions,
+                    "first_line": custom_first_line,
                 }),
             )
         )
@@ -802,6 +806,23 @@ async def get_dashboard():
         <label>Caller Name (optional)</label>
         <input type="text" id="outbound-name" placeholder="Customer name" value="">
         <div class="hint">Optional — helps the agent personalize the call.</div>
+      </div>
+    </div>
+    <div class="section-card" style="max-width:560px;margin-top:16px;">
+      <div class="section-title">Outbound Call Instructions</div>
+      <div class="form-group">
+        <label>First Line (what the agent says when the person picks up)</label>
+        <input type="text" id="outbound-first-line" placeholder="Hi! I'm calling from Daisy's Med Spa..." value="{config.get('outbound_first_line', '')}">
+        <div class="hint">Leave empty to use the default inbound greeting.</div>
+      </div>
+      <div class="form-group">
+        <label>Outbound Instructions (system prompt for outbound calls)</label>
+        <textarea id="outbound-instructions" rows="8" placeholder="e.g. You are calling to confirm an appointment...">{config.get('outbound_instructions', '')}</textarea>
+        <div class="hint">Leave empty to use the same instructions as inbound calls. These are saved to config when you click Save.</div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;">
+        <button class="btn btn-primary" onclick="saveOutboundConfig()">Save Outbound Settings</button>
+        <span class="save-status" id="save-status-outbound" style="font-size:13px;font-weight:500;color:var(--green);opacity:0;transition:opacity 0.3s;">✅ Saved!</span>
       </div>
     </div>
     <div id="outbound-status" style="margin-top:16px;max-width:560px;"></div>
@@ -1278,6 +1299,8 @@ let outboundHistory = [];
 async function makeOutboundCall() {{
   const phoneEl = document.getElementById('outbound-phone');
   const nameEl = document.getElementById('outbound-name');
+  const instrEl = document.getElementById('outbound-instructions');
+  const flEl = document.getElementById('outbound-first-line');
   const btn = document.getElementById('outbound-btn');
   const statusDiv = document.getElementById('outbound-status');
   const phone = phoneEl.value.trim();
@@ -1298,6 +1321,8 @@ async function makeOutboundCall() {{
       body: JSON.stringify({{
         phone_number: phone,
         name: nameEl.value.trim() || 'Outbound Caller',
+        instructions: instrEl.value.trim(),
+        first_line: flEl.value.trim(),
       }}),
     }});
     const data = await res.json();
@@ -1333,6 +1358,25 @@ function renderOutboundHistory() {{
       <div style="font-size:11px;color:var(--muted);">${{h.time}}</div>
     </div>
   `).join('');
+}}
+
+async function saveOutboundConfig() {{
+  const get = id => {{ const el = document.getElementById(id); return el ? el.value : ''; }};
+  const res = await fetch('/api/config', {{
+    method: 'POST',
+    headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify({{
+      outbound_instructions: get('outbound-instructions'),
+      outbound_first_line: get('outbound-first-line'),
+    }}),
+  }});
+  const statusEl = document.getElementById('save-status-outbound');
+  if (res.ok) {{
+    statusEl.style.opacity = '1';
+    setTimeout(() => {{ statusEl.style.opacity = '0'; }}, 2500);
+  }} else {{
+    alert('Failed to save outbound settings.');
+  }}
 }}
 
 // ── Boot ────────────────────────────────────────────────────────────────────

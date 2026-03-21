@@ -242,11 +242,19 @@ class AgentTools(llm.ToolContext):
 
 class OutboundAssistant(Agent):
 
-    def __init__(self, agent_tools: AgentTools, first_line: str = ""):
+    def __init__(self, agent_tools: AgentTools, first_line: str = "", is_outbound: bool = False, custom_instructions: str = ""):
         tools = llm.find_function_tools(agent_tools)
         self._first_line = first_line
         live_config = get_live_config()
-        base_instructions = live_config.get("agent_instructions", "")
+
+        # Use separate instructions for outbound calls if available
+        if is_outbound and custom_instructions:
+            base_instructions = custom_instructions
+        elif is_outbound:
+            base_instructions = live_config.get("outbound_instructions", "") or live_config.get("agent_instructions", "")
+        else:
+            base_instructions = live_config.get("agent_instructions", "")
+
         ist_context = get_ist_time_context()
         final_instructions = base_instructions + ist_context
         super().__init__(
@@ -279,6 +287,8 @@ async def entrypoint(ctx: JobContext):
     raw_meta     = ctx.job.metadata or ""
     caller_name  = "Unknown"
     is_agent_creation = False
+    outbound_custom_instructions = ""
+    outbound_first_line = ""
 
     if raw_meta.strip():
         try:
@@ -294,6 +304,8 @@ async def entrypoint(ctx: JobContext):
                     or meta.get("destination")
                 )
                 caller_name = meta.get("name", caller_name)
+                outbound_custom_instructions = meta.get("instructions", "")
+                outbound_first_line = meta.get("first_line", "")
                 if phone_number:
                     call_type = "outbound"
                     logger.info(f"[CALL] Outbound → {phone_number}")
@@ -371,7 +383,14 @@ async def entrypoint(ctx: JobContext):
             os.environ[key] = val
 
     # ── Build agent ───────────────────────────────────────────────────────
-    agent = OutboundAssistant(agent_tools=agent_tools, first_line=first_line)
+    is_outbound = (call_type == "outbound")
+    outbound_fl = outbound_first_line if is_outbound and outbound_first_line else first_line
+    agent = OutboundAssistant(
+        agent_tools=agent_tools,
+        first_line=outbound_fl,
+        is_outbound=is_outbound,
+        custom_instructions=outbound_custom_instructions if is_outbound else "",
+    )
 
     # --- Interruption state tracking ---
     global agent_is_speaking
