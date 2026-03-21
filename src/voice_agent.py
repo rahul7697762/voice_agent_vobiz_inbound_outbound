@@ -46,15 +46,17 @@ from typing import Annotated
 
 CONFIG_FILE = str(src_dir / "config.json")
 
-def get_live_config():
-    """Reads the latest config.json to inject dynamic prompts and VAD tuning."""
+def get_live_config(is_outbound=False):
+    """Reads the latest config.json or outbound_config.json to inject dynamic prompts and VAD tuning."""
+    config_file_name = "outbound_config.json" if is_outbound else "config.json"
+    config_path = str(src_dir / config_file_name)
     config = {}
-    if os.path.exists(CONFIG_FILE):
+    if os.path.exists(config_path):
         try:
-            with open(CONFIG_FILE, "r") as f:
+            with open(config_path, "r") as f:
                 config = json.load(f)
         except Exception as e:
-            logger.error(f"Failed to read config.json, falling back: {e}")
+            logger.error(f"Failed to read {config_file_name}, falling back: {e}")
             
     return {
         "agent_instructions": config.get("agent_instructions", ""),
@@ -245,7 +247,7 @@ class OutboundAssistant(Agent):
     def __init__(self, agent_tools: AgentTools, first_line: str = "", is_outbound: bool = False, custom_instructions: str = ""):
         tools = llm.find_function_tools(agent_tools)
         self._first_line = first_line
-        live_config = get_live_config()
+        live_config = get_live_config(is_outbound)
 
         # Use separate instructions for outbound calls if available
         if is_outbound and custom_instructions:
@@ -369,7 +371,7 @@ async def entrypoint(ctx: JobContext):
 
 
     # ── Read live configuration ───────────────────────────────────────────
-    live_config = get_live_config()
+    live_config = get_live_config(call_type == "outbound")
     delay_setting = live_config.get("stt_min_endpointing_delay", 0.5)
     llm_model = live_config.get("llm_model", "gpt-4o-mini")
     tts_voice = live_config.get("tts_voice", "rohan")
