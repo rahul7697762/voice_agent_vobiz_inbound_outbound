@@ -450,12 +450,11 @@ async def entrypoint(ctx: JobContext):
             language="hi-IN",
             model="saaras:v3",
             mode="translate",
-            flush_signal=True,
         ),
         vad=silero.VAD.load(
             min_silence_duration=delay_setting,   # seconds of silence before end-of-turn
-            activation_threshold=0.65,             # higher = less sensitive to noise (default 0.5)
-            min_speech_duration=0.15,              # ignore bursts shorter than 150ms (default 0.05)
+            activation_threshold=0.55,             # balanced — not too sensitive, not cutting early
+            min_speech_duration=0.2,               # ignore bursts shorter than 200ms
         ),
         llm=agent_llm,
         tts=sarvam.TTS(

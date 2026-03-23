@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venvScriptsactivate)",
+      "Bash(uv pip:*)",
+      "Bash(.venv/Scripts/pip index:*)",
+      "Bash(cmd /c \"D:\\\\\\\\InboundAIVoice\\\\\\\\.venv\\\\\\\\Scripts\\\\\\\\pip index versions supabase 2>&1\")",
+      "Bash(cmd /c \"D:\\\\\\\\InboundAIVoice\\\\\\\\.venv\\\\\\\\Scripts\\\\\\\\uv pip index versions supabase\")",
+      "Bash(cmd /c \"uv pip index versions supabase 2>&1\")",
+      "Bash(cmd /c \"python -c \\\\\"import json; c=json.load\\(open\\('D:/InboundAIVoice/config.json',encoding='utf-8'\\)\\); print\\('service_key set:', bool\\(c.get\\('supabase_service_key',''\\).strip\\(\\)\\)\\)\\\\\"\")"
+    ]
+  }
+}

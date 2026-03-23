@@ -5,20 +5,37 @@ from supabase import create_client, Client
 
 logger = logging.getLogger("db")
 
+def _patch_ssl():
+    ca = certifi.where()
+    os.environ["SSL_CERT_FILE"]      = ca
+    os.environ["REQUESTS_CA_BUNDLE"] = ca
+    os.environ["CURL_CA_BUNDLE"]     = ca
+
 def get_supabase() -> Client | None:
+    """Anon/public key client — subject to RLS."""
     url = os.environ.get("SUPABASE_URL", "")
     key = os.environ.get("SUPABASE_KEY", "")
     if not url or not key:
         return None
     try:
-        # Patch SSL CA bundle for all HTTP libraries (fixes Windows self-signed cert error)
-        ca = certifi.where()
-        os.environ["SSL_CERT_FILE"]      = ca
-        os.environ["REQUESTS_CA_BUNDLE"] = ca
-        os.environ["CURL_CA_BUNDLE"]     = ca
+        _patch_ssl()
         return create_client(url, key)
     except Exception as e:
         logger.error(f"Failed to initialize Supabase client: {e}")
+        return None
+
+def get_supabase_admin() -> Client | None:
+    """Service role key client — bypasses RLS. Use only on the server. Set SUPABASE_SERVICE_KEY in .env."""
+    url         = os.environ.get("SUPABASE_URL", "")
+    service_key = os.environ.get("SUPABASE_SERVICE_KEY", "")
+    if not url or not service_key:
+        logger.warning("SUPABASE_SERVICE_KEY not set in .env — falling back to anon key.")
+        return get_supabase()
+    try:
+        _patch_ssl()
+        return create_client(url, service_key)
+    except Exception as e:
+        logger.error(f"Failed to initialize Supabase admin client: {e}")
         return None
 
 def save_call_log(phone: str, duration: int, transcript: str, summary: str = "", recording_url: str = "", caller_name: str = "") -> dict:

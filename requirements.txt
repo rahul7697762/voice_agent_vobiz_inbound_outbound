@@ -15,7 +15,7 @@ uvicorn>=0.28.0
 # ── Timezone / timing synchronisation ────────────────────────────────────────
 pytz>=2024.1
 httpx
-supabase
+supabase==2.7.4
 sarvamai>=0.1.25
 numpy>=1.26.0
 certifi>=2024.2.2

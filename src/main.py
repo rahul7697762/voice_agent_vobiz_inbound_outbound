@@ -1,8 +1,9 @@
 import json
 import logging
 import os
+import re
 from pathlib import Path
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse, PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
@@ -19,6 +20,7 @@ logger = logging.getLogger("ui-server")
 
 app = FastAPI(title="Med Spa AI Dashboard")
 
+
 # Allow external websites to call the API (CORS)
 app.add_middleware(
     CORSMiddleware,
@@ -31,43 +33,27 @@ app.add_middleware(
 CONFIG_FILE = "config.json"
 
 def read_config():
+    """Read only non-secret agent config from config.json. Secrets come from .env."""
     config = {}
     if os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE, "r") as f:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
             config = json.load(f)
-
-    def get_val(key, env_key, default=""):
-        return config.get(key) if config.get(key) else os.getenv(env_key, default)
-
     return {
-        "first_line": get_val("first_line", "FIRST_LINE", "Namaste! Welcome to Daisy's Med Spa. Main aapki kaise madad kar sakti hoon? I can answer questions about our treatments or help you book an appointment."),
-        "agent_instructions": get_val("agent_instructions", "AGENT_INSTRUCTIONS", ""),
-        "stt_min_endpointing_delay": float(get_val("stt_min_endpointing_delay", "STT_MIN_ENDPOINTING_DELAY", 0.6)),
-        "llm_model": get_val("llm_model", "LLM_MODEL", "gpt-4o-mini"),
-        "tts_voice": get_val("tts_voice", "TTS_VOICE", "kavya"),
-        "tts_language": get_val("tts_language", "TTS_LANGUAGE", "hi-IN"),
-        "livekit_url": get_val("livekit_url", "LIVEKIT_URL", ""),
-        "sip_trunk_id": get_val("sip_trunk_id", "SIP_TRUNK_ID", ""),
-        "livekit_api_key": get_val("livekit_api_key", "LIVEKIT_API_KEY", ""),
-        "livekit_api_secret": get_val("livekit_api_secret", "LIVEKIT_API_SECRET", ""),
-        "openai_api_key": get_val("openai_api_key", "OPENAI_API_KEY", ""),
-        "sarvam_api_key": get_val("sarvam_api_key", "SARVAM_API_KEY", ""),
-        "cal_api_key": get_val("cal_api_key", "CAL_API_KEY", ""),
-        "cal_event_type_id": get_val("cal_event_type_id", "CAL_EVENT_TYPE_ID", ""),
-        "telegram_bot_token": get_val("telegram_bot_token", "TELEGRAM_BOT_TOKEN", ""),
-        "telegram_chat_id": get_val("telegram_chat_id", "TELEGRAM_CHAT_ID", ""),
-        "supabase_url": get_val("supabase_url", "SUPABASE_URL", ""),
-        "supabase_key": get_val("supabase_key", "SUPABASE_KEY", ""),
-        "vobiz_auth_id": get_val("vobiz_auth_id", "VOBIZ_AUTH_ID", ""),
-        "vobiz_auth_token": get_val("vobiz_auth_token", "VOBIZ_AUTH_TOKEN", ""),
-        **config
+        "first_line":                config.get("first_line", ""),
+        "agent_instructions":        config.get("agent_instructions", ""),
+        "stt_min_endpointing_delay": float(config.get("stt_min_endpointing_delay", 0.6)),
+        "llm_model":                 config.get("llm_model", "gpt-4o-mini"),
+        "tts_voice":                 config.get("tts_voice", "kavya"),
+        "tts_language":              config.get("tts_language", "hi-IN"),
+        "whatsapp_client_template":  config.get("whatsapp_client_template", "acknowledgement"),
+        "whatsapp_admin_template":   config.get("whatsapp_admin_template", "acknowledgement"),
     }
 
 def write_config(data):
     config = read_config()
     config.update(data)
-    with open(CONFIG_FILE, "w") as f:
-        json.dump(config, f, indent=4)
+    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=4, ensure_ascii=False)
 
 
 # ── Vobiz helpers ─────────────────────────────────────────────────────────────
@@ -81,6 +67,124 @@ def _vobiz_headers():
     if not auth_id or not auth_token:
         raise ValueError("Vobiz credentials not configured. Add X-Auth-ID and X-Auth-Token in API Credentials.")
     return {"X-Auth-ID": auth_id, "X-Auth-Token": auth_token, "Content-Type": "application/json"}
+
+# ── Auth Endpoints ─────────────────────────────────────────────────────────────
+
+@app.post("/api/auth/signup")
+async def auth_signup(request: Request):
+    from db import get_supabase, get_supabase_admin
+    body = await request.json()
+    email     = body.get("email", "").strip().lower()
+    password  = body.get("password", "")
+    full_name = body.get("full_name", "").strip()
+    org_name  = body.get("org_name", "").strip()
+
+    if not email or not password or not full_name or not org_name:
+        raise HTTPException(status_code=400, detail="All fields are required.")
+
+    anon_client  = get_supabase()
+    admin_client = get_supabase_admin()
+    if not anon_client or not admin_client:
+        raise HTTPException(status_code=500, detail="Database not configured.")
+
+    # 1. Create user via admin API (bypasses email confirmation + rate limits)
+    try:
+        res = admin_client.auth.admin.create_user({
+            "email": email,
+            "password": password,
+            "email_confirm": True,          # auto-confirm, no email sent
+            "user_metadata": {"full_name": full_name},
+        })
+        if not res.user:
+            raise HTTPException(status_code=400, detail="Signup failed. Email may already be in use.")
+        user_id = res.user.id
+        logger.info(f"[SIGNUP] Auth user created: {user_id}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[SIGNUP] Auth error: {e}")
+        msg = str(e)
+        if "already" in msg.lower() or "duplicate" in msg.lower():
+            raise HTTPException(status_code=400, detail="An account with this email already exists.")
+        raise HTTPException(status_code=400, detail=msg)
+
+    # 2. Create organization (admin client bypasses RLS)
+    slug = re.sub(r"[^a-z0-9]+", "-", org_name.lower()).strip("-")
+    try:
+        org_res = admin_client.table("organizations").insert({"name": org_name, "slug": slug}).execute()
+        org_id  = org_res.data[0]["id"]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create organization: {e}")
+
+    # 3. Save user profile + org membership (admin client bypasses RLS)
+    try:
+        admin_client.table("user_profiles").insert({"id": user_id, "full_name": full_name}).execute()
+        admin_client.table("org_members").insert({
+            "org_id": org_id,
+            "user_id": user_id,
+            "role": "owner",
+        }).execute()
+    except Exception as e:
+        logger.error(f"[SIGNUP] Failed to create profile/membership: {e}")
+
+    logger.info(f"[SIGNUP] New account: {email} → org '{org_name}' ({org_id})")
+    return {"status": "success", "message": "Account created. Please check your email to confirm."}
+
+
+@app.post("/api/auth/login")
+async def auth_login(request: Request):
+    from db import get_supabase
+    body     = await request.json()
+    email    = body.get("email", "").strip().lower()
+    password = body.get("password", "")
+
+    if not email or not password:
+        raise HTTPException(status_code=400, detail="Email and password are required.")
+
+    supabase = get_supabase()
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Database not configured.")
+
+    # 1. Authenticate with Supabase
+    try:
+        res = supabase.auth.sign_in_with_password({"email": email, "password": password})
+        if not res.session:
+            raise HTTPException(status_code=401, detail="Invalid email or password.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=401, detail="Invalid email or password.")
+
+    user_id      = res.user.id
+    access_token = res.session.access_token
+
+    # 2. Fetch org membership
+    try:
+        mem = supabase.table("org_members").select("org_id, role").eq("user_id", user_id).limit(1).execute()
+        org_id = mem.data[0]["org_id"] if mem.data else None
+        role   = mem.data[0]["role"]   if mem.data else "member"
+    except Exception:
+        org_id, role = None, "member"
+
+    # 3. Fetch display name
+    try:
+        profile = supabase.table("user_profiles").select("full_name").eq("id", user_id).single().execute()
+        full_name = profile.data.get("full_name", "") if profile.data else ""
+    except Exception:
+        full_name = ""
+
+    logger.info(f"[LOGIN] {email} authenticated (org={org_id})")
+    return {
+        "token": access_token,
+        "user": {
+            "id":     user_id,
+            "email":  res.user.email,
+            "name":   full_name,
+            "org_id": org_id,
+            "role":   role,
+        },
+    }
+
 
 # ── API Endpoints ──────────────────────────────────────────────────────────────
 
